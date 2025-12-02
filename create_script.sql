@@ -25,7 +25,6 @@ CREATE TABLE org_struct (
 	parent_id INT REFERENCES org_struct(id),
 	name VARCHAR(100) NOT NULL CHECK (name ~ '^[а-яА-ЯйЙa-zA-Z ]+$'),
 	org_type eOrg_type NOT NULL
-	-- TODO: add trigger to check if org_type/parent_id columns follow "organization -> department -> division" hierarchy 
 );
 
 CREATE TABLE groups (
@@ -227,3 +226,42 @@ CREATE TABLE booking (
 	booking_start TIMESTAMP NOT NULL,
 	duration INTERVAL NOT NULL
 );
+
+
+CREATE OR REPLACE FUNCTION org_hierarchy_checker()
+RETURNS trigger AS
+$$
+DECLARE 
+	parent_org_type eOrg_type;
+BEGIN
+
+	SELECT org_type INTO parent_org_type FROM org_struct WHERE id = NEW.parent_id;
+	
+	IF NEW.org_type = 'organization' THEN
+		IF NEW.parent_id IS NOT NULL THEN
+			RAISE EXCEPTION 'for this org_type parent_id must be null';		
+		END IF;
+		RETURN NEW;
+	END IF;
+
+	IF NEW.parent_id IS NULL THEN
+		RAISE EXCEPTION 'org_type must have a parent';
+	END IF;	
+		
+	IF NEW.org_type = 'department' AND parent_org_type != 'organization' THEN
+		RAISE EXCEPTION 'org_type of parent must be "organization"';
+	END IF;
+
+	IF NEW.org_type = 'division' AND parent_org_type != 'department' THEN
+		RAISE EXCEPTION 'org_type of parent must be "department"';
+	END IF;
+
+	RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
+
+CREATE trigger org_hierarchy_trigger
+BEFORE INSERT ON org_struct
+FOR EACH ROW
+EXECUTE FUNCTION org_hierarchy_checker();
