@@ -8,6 +8,7 @@ CREATE TYPE eObject_type AS ENUM ('software', 'module', 'package');
 CREATE TYPE eKey_type AS ENUM ('physical', 'virtual');
 CREATE TYPE eLanguage AS ENUM ('russian', 'french', 'english', 'multilingual', 'other');
 CREATE TYPE eSystem_architecture AS ENUM ('x64/x86', 'x64', 'x86', 'ARM', 'RISCV'); -- x64 обратно совместим с x86, какой смысл от 'x64/x86'?
+																					-- У него в эксельке в разрядности системы так было, я решил оставить на всякий
 CREATE TYPE eOrg_type AS ENUM ('organization', 'department', 'division');
 CREATE TYPE eArm_type AS ENUM ('server', 'physical_machine', 'virtual_machine', 'mixed_machine');
 CREATE TYPE eLink_type AS ENUM ('user', 'arm', 'group');
@@ -21,21 +22,22 @@ CREATE TABLE arm (
 
 CREATE TABLE org_struct (
 	id SERIAL PRIMARY KEY,
-	parent_id INT NOT NULL REFERENCES org_struct(id),
-	name VARCHAR(100) NOT NULL CHECK (name ~ '^[a-zA-Z0-9-]+$'),
+	parent_id INT REFERENCES org_struct(id),
+	name VARCHAR(100) NOT NULL CHECK (name ~ '^[а-яА-ЯйЙa-zA-Z ]+$'),
 	org_type eOrg_type NOT NULL
+	-- TODO: add trigger to check if org_type/parent_id columns follow "organization -> department -> division" hierarchy 
 );
 
 CREATE TABLE groups (
 	id SERIAL PRIMARY KEY,
-	name VARCHAR(100) NOT NULL CHECK (name ~ '^[a-zA-Z]+$')
+	name VARCHAR(100) NOT NULL CHECK (name ~ '^[а-яА-ЯйЙa-zA-Z ]+$')
 );
 
 CREATE TABLE users (
 	id SERIAL PRIMARY KEY,
-	name VARCHAR(100) NOT NULL CHECK (name ~ '^[a-zA-Z]+$'),
+	name VARCHAR(100) NOT NULL CHECK (name ~ '^[а-яА-ЯйЙ ]+$'),
 	email VARCHAR(100) NOT NULL CHECK (email ~ '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'),
-	SAM_account_name VARCHAR(100) NOT NULL, -- add regex
+	SAM_account_name VARCHAR(100) NOT NULL CHECK (SAM_account_name ~ '^[a-zA-Z]+$'),
 	employee_id VARCHAR(4) NOT NULL CHECK (employee_id ~ '^[0-9]+$'),
 	is_editor BOOL NOT NULL,
 	org_struct_id INT NOT NULL REFERENCES org_struct(id)
@@ -57,15 +59,15 @@ CREATE TABLE company_catalog (
 	id SERIAL PRIMARY KEY,
 	name VARCHAR(100) NOT NULL CHECK (name ~ '^[a-zA-Z0-9-]+$'),
 	is_domestic BOOL NOT NULL,
-	website VARCHAR(100) CHECK (website ~ '^((https?|ftp|smtp):\/\/)?(www.)?[a-z0-9]+\.[a-z]+(\/[a-zA-Z0-9#]+\/?)*$')
+	website VARCHAR(100) CHECK (website ~ '^(https?:\/\/)?(www.)?[a-z0-9]+\.[a-z]+(\/[a-zA-Z0-9#]+\/?)*$')
 );
 
 CREATE TABLE software_catalog (
 	id SERIAL PRIMARY KEY,
 	company_id INT NOT NULL REFERENCES company_catalog(id),
 	is_standalone BOOL NOT NULL,
-	name VARCHAR(100) NOT NULL CHECK (name ~ '^[a-zA-Z0-9-]+$'),
-	functionality_description VARCHAR(100) NOT NULL,
+	name VARCHAR(100) NOT NULL CHECK (name ~ '^[а-яА-ЯйЙa-zA-Z0-9]+$'),
+	functionality_description VARCHAR(300) NOT NULL,
 	language eLanguage NOT NULL,
 	system_architecture eSystem_architecture NOT NULL
 );
@@ -73,16 +75,16 @@ CREATE TABLE software_catalog (
 CREATE TABLE package_catalog (
 	id SERIAL PRIMARY KEY,
 	software_id INT NOT NULL REFERENCES software_catalog(id),
-	name VARCHAR(100) NOT NULL CHECK (name ~ '^[a-zA-Z0-9-]+$'),
-	unique_id VARCHAR(100) NOT NULL -- add regex
+	name VARCHAR(100) NOT NULL CHECK (name ~ '^[а-яА-ЯйЙa-zA-Z0-9]+$'),
+	unique_id VARCHAR(100) NOT NULL CHECK (unique_id ~ '^[a-zA-Z0-9]+$') -- TODO: спросить зыкова про формат, но кажется ранее он говорил про буквы и цифры
 );
 
 CREATE TABLE module_catalog (
 	id SERIAL PRIMARY KEY,
-	software_id INT REFERENCES software_catalog(id),
-	articul VARCHAR(100) NOT NULL CHECK (articul ~ '^[a-zA-Z0-9-]+$'),
-	name VARCHAR(100) NOT NULL CHECK (name ~ '^[a-zA-Z0-9-]+$'),
-	functionality_description VARCHAR(100) NOT NULL
+	software_id INT NOT NULL REFERENCES software_catalog(id),
+	articul VARCHAR(100) NOT NULL CHECK (articul ~ '^[а-яА-ЯйЙa-zA-Z0-9-]+$'),
+	name VARCHAR(100) NOT NULL CHECK (name ~ '^[а-яА-ЯйЙa-zA-Z0-9]+$'),
+	functionality_description VARCHAR(300) NOT NULL
 );
 
 CREATE TABLE license_obj_catalog (
@@ -90,14 +92,34 @@ CREATE TABLE license_obj_catalog (
 	license_metric_type eLicensing_metric_type NOT NULL,
 	licensing_type eLicensing_type NOT NULL,
 	object_type eObject_type NOT NULL,
-	max_possible_version VARCHAR(100) NOT NULL CHECK (max_possible_version ~ '^[0-9.]+$'),
-	current_version VARCHAR(100) NOT NULL CHECK (current_version ~ '^[0-9.]+$'),
-	software_id INT NOT NULL UNIQUE REFERENCES software_catalog(id),
-	package_id INT NOT NULL UNIQUE REFERENCES package_catalog(id),
-	module_id INT NOT NULL UNIQUE REFERENCES module_catalog(id),
+	max_possible_version VARCHAR(50) NOT NULL CHECK (max_possible_version ~ '^[0-9.]+$'),
+	current_version VARCHAR(50) NOT NULL CHECK (current_version ~ '^[0-9.]+$'),
+	software_id INT UNIQUE REFERENCES software_catalog(id),
+	package_id INT UNIQUE REFERENCES package_catalog(id),
+	module_id INT UNIQUE REFERENCES module_catalog(id),
 	key_type eKey_type NOT NULL,
-	max_activations INT NOT NULL,
-	max_concurrent INT NOT NULL
+	max_activations INT NOT NULL CHECK (max_activations >= 0),
+	max_concurrent INT NOT NULL CHECK (max_concurrent >= 0),
+	CONSTRAINT chk_obj_types CHECK(
+		(
+			object_type = 'software'::eObject_type AND 
+			software_id IS NOT NULL AND 
+			package_id IS NULL AND 
+			module_id IS NULL
+		)::int + 
+		(
+			object_type = 'package'::eObject_type AND 
+			software_id IS NULL AND 
+			package_id IS NOT NULL AND 
+			module_id IS NULL
+		)::int + 
+		(
+			object_type = 'module'::eObject_type AND 
+			software_id IS NULL AND 
+			package_id IS NULL AND 
+			module_id IS NOT NULL
+		)::int = 1
+	)
 );
 
 CREATE TABLE linking_module_to_package (
@@ -115,9 +137,9 @@ CREATE TABLE license_server (
 
 CREATE TABLE license (
 	id SERIAL PRIMARY KEY,
-	name VARCHAR(100) NOT NULL,
+	name VARCHAR(100) NOT NULL CHECK (name ~ '^[а-яА-ЯйЙa-zA-Z0-9. ]+$'),
 	license_server_id INT NOT NULL REFERENCES license_server(id),
-	port INT NOT NULL CHECK (port <= 65535),
+	port INT NOT NULL CHECK (port <= 65535 AND port >= 0),
 	responsible_user_id INT NOT NULL REFERENCES users(id),
 	max_booking_period INTERVAL NOT NULL
 );
@@ -133,7 +155,7 @@ CREATE TABLE purchase (
 	license_id INT NOT NULL REFERENCES license(id),
 	purchase_object ePurchase_object NOT NULL,
 	purchased_at TIMESTAMP NOT NULL,
-	count INT NOT NULL,
+	count INT NOT NULL CHECK (count >= 0),
 	is_planned BOOL NOT NULL
 );
 
@@ -143,14 +165,27 @@ CREATE TABLE purchase_dates (
 	starts_at DATE NOT NULL,
 	ends_at DATE,
 	start_notifying_at DATE,
-	PRIMARY KEY (purchase_id, date_type)
+	PRIMARY KEY (purchase_id, date_type),
+	CONSTRAINT chk_starts_ends_dates CHECK ( 
+		(ends_at IS NULL) OR 
+		(starts_at <= ends_at) 
+	),
+	CONSTRAINT chk_ends_notifying_dates CHECK ( 
+		(start_notifying_at IS NULL) OR 
+		( 
+			starts_at <= start_notifying_date AND
+			(
+				(ends_at IS NULL) OR (start_notifying_at <= ends_at)
+			) 
+		)
+	)
 );
 
 CREATE TABLE document (
 	id SERIAL PRIMARY KEY,
 	purchase_id INT NOT NULL REFERENCES purchase(id),
-	doc_no INT NOT NULL,
-	name VARCHAR(100) NOT NULL,
+	doc_no INT NOT NULL CHECK (doc_no >= 0),
+	name VARCHAR(100) NOT NULL CHECK (name ~ '^[а-яА-ЯйЙa-zA-Z0-9-=№ ]+$'),
 	signing_date DATE NOT NULL,
 	directum_link VARCHAR(100) NOT NULL,
 	status eStatus NOT NULL,
@@ -163,7 +198,27 @@ CREATE TABLE reestr (
 	license_id INT NOT NULL UNIQUE REFERENCES license(id),
 	group_id INT UNIQUE REFERENCES groups(id),
 	user_id INT UNIQUE REFERENCES users(id),
-	arm_id INT UNIQUE REFERENCES arm(id)
+	arm_id INT UNIQUE REFERENCES arm(id),
+	CONSTRAINT chk_link_types CHECK (
+		(
+			object_type = 'group'::eLink_type AND 
+			group_id IS NOT NULL AND 
+			user_id IS NULL AND 
+			arm_id IS NULL
+		)::int + 
+		(
+			object_type = 'user'::eLink_type AND 
+			group_id IS NULL AND 
+			user_id IS NOT NULL AND 
+			arm_id IS NULL
+		)::int + 
+		(
+			object_type = 'arm'::eLink_type AND 
+			group_id IS NULL AND 
+			user_id IS NULL AND 
+			arm_id IS NOT NULL
+		)::int = 1
+	)
 );
 
 CREATE TABLE booking (
