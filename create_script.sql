@@ -173,7 +173,7 @@ CREATE TABLE purchase_dates (
 	CONSTRAINT chk_ends_notifying_dates CHECK ( 
 		(start_notifying_at IS NULL) OR 
 		( 
-			starts_at <= start_notifying_date AND
+			starts_at <= start_notifying_at AND
 			(
 				(ends_at IS NULL) OR (start_notifying_at <= ends_at)
 			) 
@@ -201,19 +201,19 @@ CREATE TABLE reestr (
 	arm_id INT UNIQUE REFERENCES arm(id),
 	CONSTRAINT chk_link_types CHECK (
 		(
-			object_type = 'group'::eLink_type AND 
+			link_type = 'group'::eLink_type AND 
 			group_id IS NOT NULL AND 
 			user_id IS NULL AND 
 			arm_id IS NULL
 		)::int + 
 		(
-			object_type = 'user'::eLink_type AND 
+			link_type = 'user'::eLink_type AND 
 			group_id IS NULL AND 
 			user_id IS NOT NULL AND 
 			arm_id IS NULL
 		)::int + 
 		(
-			object_type = 'arm'::eLink_type AND 
+			link_type = 'arm'::eLink_type AND 
 			group_id IS NULL AND 
 			user_id IS NULL AND 
 			arm_id IS NOT NULL
