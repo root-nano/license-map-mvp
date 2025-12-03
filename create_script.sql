@@ -227,6 +227,71 @@ CREATE TABLE booking (
 	duration INTERVAL NOT NULL
 );
 
+-- ARCHIVES 
+
+CREATE TABLE archive_license (
+	id INT PRIMARY KEY,
+	name VARCHAR(100) NOT NULL,
+	archived_at TIMESTAMP NOT NULL,
+	port INT NOT NULL,
+	max_booking_period INTERVAL NOT NULL
+);
+
+CREATE TABLE archive_purchase (
+	id INT PRIMARY KEY,
+	archive_license_id INT NOT NULL REFERENCES archive_license(id),
+	purchase_object ePurchase_object NOT NULL,
+	purchase_at TIMESTAMP NOT NULL,
+	count INT NOT NULL
+);
+
+CREATE TABLE archive_document (
+	id INT PRIMARY KEY,
+	archive_purchase_id INT NOT NULL REFERENCES archive_purchase(id),
+	doc_no INT NOT NULL,
+	name VARCHAR(100) NOT NULL,
+	signing_date DATE NOT NULL,
+	directum_link VARCHAR(100) NOT NULL,
+	status eStatus NOT NULL,
+	document_type eDocument_type NOT NULL
+);
+
+CREATE TABLE archive_purchase_dates (
+	archive_purchase_id INT NOT NULL REFERENCES archive_purchase(id),
+	date_type eDate_type NOT NULL,
+	starts_at DATE NOT NULL,
+	ends_at DATE,
+	start_notifying_at DATE,
+	PRIMARY KEY (archive_purchase_id, date_type)
+);
+
+CREATE TABLE linking_license_obj_to_archive_license (
+	license_obj_id INT REFERENCES license_obj_catalog(id),
+	archive_license_id INT REFERENCES archive_license(id),
+	PRIMARY KEY (license_obj_id, archive_license_id)
+);
+
+CREATE TABLE archive_user (
+	id INT NOT NULL,
+	archived_at TIMESTAMP NOT NULL,
+	name VARCHAR(100)
+);
+
+-- тут скорее всего херня кита проверь пж
+CREATE TABLE archive_users (
+	id SERIAL PRIMARY KEY,
+	name VARCHAR(100) NOT NULL,
+	email VARCHAR(100) NOT NULL,
+	SAM_account_name VARCHAR(100) NOT NULL,
+	employee_id VARCHAR(4) NOT NULL,
+	is_editor BOOL NOT NULL,
+	org_struct_id INT NOT NULL
+);
+
+-- END CREATE TABLE
+
+
+-- ТРИГГЕР ДЛЯ ПРОВЕРКИ ИЕРАРХИИ В ТАБЛИЦЕ ОРГАНИЗАЦИЙ
 
 CREATE OR REPLACE FUNCTION org_hierarchy_checker()
 RETURNS trigger AS
