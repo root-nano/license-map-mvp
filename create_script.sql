@@ -265,3 +265,12 @@ CREATE trigger org_hierarchy_trigger
 BEFORE INSERT ON org_struct
 FOR EACH ROW
 EXECUTE FUNCTION org_hierarchy_checker();
+
+
+-- VIEW ДЛЯ АКТИВНЫХ ЛИЦЕНЗИЙ
+CREATE VIEW active_licenses AS
+	SELECT license.id, license.name, license_server_id, port, responsible_user_id, max_booking_period 
+	FROM license 
+		JOIN purchase ON license.id = purchase.license_id
+			JOIN document ON purchase.id = document.purchase_id
+			WHERE document.status = 'active';
