@@ -603,3 +603,151 @@ BEGIN
 END;
 $$
 LANGUAGE plpgsql;
+
+
+-- СОЗДАНИЕ РЕДАКТИРОВАНИЕ COMPANY
+
+CREATE OR REPLACE PROCEDURE create_company (
+	p_name VARCHAR(100),
+	p_is_domestic BOOL,
+	p_website VARCHAR(100)
+) AS
+$$
+BEGIN
+	INSERT INTO company_catalog (name, is_domestic, website)
+	VALUES (p_name, p_is_domestic, p_website);
+END;
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE PROCEDURE update_company (
+	p_id INT,
+	p_name VARCHAR(100) DEFAULT NULL,
+	p_is_domestic BOOL DEFAULT NULL,
+	p_website VARCHAR(100) DEFAULT NULL
+) AS
+$$
+BEGIN
+	UPDATE company_catalog SET
+		name = COALESCE (p_name, name),
+		is_domestic = COALESCE (p_is_domestic, is_domestic),
+		p_website = COALESCE (p_website, website)
+	WHERE id = p_id;
+END;
+$$
+LANGUAGE plpgsql;
+
+-- СОЗДАНИЕ РЕДАКТИРОВАНИЕ SOFTWARE
+
+CREATE OR REPLACE PROCEDURE create_software (
+    p_company_id INT,
+    p_is_standalone BOOL,
+    p_name VARCHAR(100),
+    p_functionality_description VARCHAR(300),
+    p_language eLanguage,
+    p_system_architecture eSystem_architecture
+) AS
+$$
+BEGIN
+    INSERT INTO software_catalog (
+        company_id, 
+        is_standalone, 
+        name, 
+        functionality_description, 
+        language, 
+        system_architecture
+    )
+    VALUES (
+        p_company_id, 
+        p_is_standalone, 
+        p_name, 
+        p_functionality_description, 
+        p_language, 
+        p_system_architecture
+    );
+END;
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE PROCEDURE update_software (
+    p_id INT,
+    p_company_id INT DEFAULT NULL,
+    p_is_standalone BOOL DEFAULT NULL,
+    p_name VARCHAR(100) DEFAULT NULL,
+    p_functionality_description VARCHAR(300) DEFAULT NULL,
+    p_language eLanguage DEFAULT NULL,
+    p_system_architecture eSystem_architecture DEFAULT NULL
+) AS
+$$
+BEGIN
+    UPDATE software_catalog SET
+        company_id = COALESCE (p_company_id, company_id),
+        is_standalone = COALESCE (p_is_standalone, is_standalone),
+        name = COALESCE (p_name, name),
+        functionality_description = COALESCE (p_functionality_description, functionality_description),
+        language = COALESCE (p_language, language),
+        system_architecture = COALESCE (p_system_architecture, system_architecture)
+    WHERE id = p_id;
+END;
+$$
+LANGUAGE plpgsql;
+
+
+-- СОЗДАНИЕ РЕДАКТИРОВАНИЕ PACKAGE
+
+CREATE OR REPLACE PROCEDURE create_package (
+    p_software_id INT,
+    p_name VARCHAR(100),
+    p_unique_id VARCHAR(100)
+) AS
+$$
+BEGIN
+    INSERT INTO package_catalog (software_id, name, unique_id)
+    VALUES (p_software_id, p_name, p_unique_id);
+END;
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE PROCEDURE update_package (
+    p_id INT,
+    p_software_id INT DEFAULT NULL,
+    p_name VARCHAR(100) DEFAULT NULL,
+    p_unique_id VARCHAR(100) DEFAULT NULL
+) AS
+$$
+BEGIN
+    UPDATE package_catalog SET
+        software_id = COALESCE (p_software_id, software_id),
+        name = COALESCE (p_name, name),
+        unique_id = COALESCE (p_unique_id, unique_id)
+    WHERE id = p_id;
+END;
+$$
+LANGUAGE plpgsql;
+
+
+-- СОЗДАНИЕ MODULE
+
+CREATE OR REPLACE PROCEDURE create_module (
+    p_software_id INT,
+    p_articul VARCHAR(100),
+    p_name VARCHAR(100),
+    p_functionality_description VARCHAR(300)
+) AS
+$$
+BEGIN
+    INSERT INTO module_catalog (
+        software_id, 
+        articul, 
+        name, 
+        functionality_description
+    )
+    VALUES (
+        p_software_id, 
+        p_articul, 
+        p_name, 
+        p_functionality_description
+    );
+END;
+$$
+LANGUAGE plpgsql;
