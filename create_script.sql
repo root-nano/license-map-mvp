@@ -351,3 +351,96 @@ CREATE trigger users_archiver_trigger
 AFTER UPDATE OR DELETE on users
 FOR EACH ROW
 EXECUTE FUNCTION users_archiver();
+
+
+-- license obj procedures
+
+CREATE OR REPLACE PROCEDURE create_license_obj (
+	p_licensing_metric_type eLicensing_metric_type,
+	p_licensing_type eLicensing_type,
+	p_object_type eObject_type,
+	p_max_possible_version VARCHAR(50),
+	p_current_version VARCHAR(50),
+	p_software_id INT,
+	p_package_id INT,
+	p_module_id INT,
+	p_key_type eKey_type,
+	p_max_activations INT,
+	p_max_concurrent INT
+) AS
+$$
+BEGIN
+	INSERT INTO license_obj (
+		license_metric_type,
+		licensing_type,
+		object_type,
+		max_possible_version,
+		current_version,
+		software_id,
+		package_id,
+		module_id,
+		key_type,
+		max_activations,
+		max_concurrent
+	)
+	VALUES (
+		p_licensing_metric_type,
+        p_licensing_type,
+        p_object_type,
+        p_max_possible_version,
+        p_current_version,
+        p_software_id,
+        p_package_id,
+        p_module_id,
+        p_key_type,
+        p_max_activations,
+        p_max_concurrent
+	);
+END;
+$$
+LANGUAGE plpgsql;
+
+
+-- call update_license_obj (arg => val);
+CREATE OR REPLACE PROCEDURE update_license_obj (
+	p_id INT,
+	p_licensing_metric_type eLicensing_metric_type DEFAULT NULL,
+	p_licensing_type eLicensing_type DEFAULT NULL,
+	p_object_type eObject_type DEFAULT NULL,
+	p_max_possible_version VARCHAR(50) DEFAULT NULL,
+	p_current_version VARCHAR(50) DEFAULT NULL,
+	p_software_id INT DEFAULT NULL,
+	p_package_id INT DEFAULT NULL,
+	p_module_id INT DEFAULT NULL,
+	p_key_type eKey_type DEFAULT NULL,
+	p_max_activations INT DEFAULT NULL,
+	p_max_concurrent INT DEFAULT NULL
+) AS
+$$
+BEGIN
+	UPDATE license_obj
+	SET
+		license_metric_type = COALESCE (p_licensing_metric_type, license_metric_type),
+		licensing_type = COALESCE (p_licensing_type, licensing_type),
+		object_type = COALESCE (p_object_type, object_type),
+		max_possible_version = COALESCE (p_max_possible_version, max_possible_version),
+		current_version = COALESCE (p_current_version, current_version),
+		software_id = COALESCE (p_software_id, software_id),
+		package_id = COALESCE (p_package_id, package_id),
+		module_id = COALESCE (p_module_id, module_id),
+		key_type = COALESCE (p_key_type, key_type),
+		max_activations = COALESCE (p_max_activations, max_activations),
+		max_concurrent = COALESCE (p_max_concurrent, max_concurrent)
+	WHERE id = p_id;
+END;
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE PROCEDURE delete_license_obj (p_id) AS
+$$
+BEGIN
+	DELETE FROM license_obj WHERE id = p_id;
+END;
+$$
+LANGUAGE plpgsql;
+ 
