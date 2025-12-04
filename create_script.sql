@@ -232,7 +232,7 @@ CREATE TABLE booking (
 CREATE TABLE archive_license (
 	id INT PRIMARY KEY,
 	name VARCHAR(100) NOT NULL,
-	archived_at TIMESTAMP NOT NULL,
+	archived_at TIMESTAMP DEFAULT now()::timestamp,
 	port INT NOT NULL,
 	max_booking_period INTERVAL NOT NULL
 );
@@ -271,15 +271,10 @@ CREATE TABLE linking_license_obj_to_archive_license (
 	PRIMARY KEY (license_obj_id, archive_license_id)
 );
 
-CREATE TABLE archive_user (
-	id INT NOT NULL,
-	archived_at TIMESTAMP NOT NULL,
-	name VARCHAR(100)
-);
-
--- тут скорее всего херня кита проверь пж
+-- тут скорее всего херня некит проверь пж
 CREATE TABLE archive_users (
 	id SERIAL PRIMARY KEY,
+	archived_at TIMESTAMP DEFAULT now()::timestamp,
 	name VARCHAR(100) NOT NULL,
 	email VARCHAR(100) NOT NULL,
 	SAM_account_name VARCHAR(100) NOT NULL,
@@ -339,3 +334,20 @@ CREATE VIEW active_licenses AS
 		JOIN purchase ON license.id = purchase.license_id
 			JOIN document ON purchase.id = document.purchase_id
 			WHERE document.status = 'active';
+
+-- ТРИГГЕР ДЛЯ АРХИВАЦИИ ТАБЛИЦЫ ПОЛЬЗОВАТЕЛЕЙ
+CREATE OR REPLACE FUNCTION users_archiver()
+RETURNS trigger AS
+$$
+BEGIN
+	INSERT INTO archive_users (name, email, SAM_account_name, employee_id, is_editor, org_struct_id)
+	VALUES (OLD.name, OLD.email, OLD.SAM_account_name, OLD.employee_id, OLD.is_editor, OLD.org_struct_id);
+	RETURN NULL;
+END;
+$$
+LANGUAGE plpgsql;
+
+CREATE trigger users_archiver_trigger
+AFTER UPDATE OR DELETE on users
+FOR EACH ROW
+EXECUTE FUNCTION users_archiver();
