@@ -444,3 +444,162 @@ END;
 $$
 LANGUAGE plpgsql;
  
+-- ПРОЦЕДУРЫ ДЛЯ ПОКУПОК
+
+-- ИЗМЕНИТЬ ДАТУ УВЕДОМЛЕНИЙ
+CREATE OR REPLACE PROCEDURE update_notification_date (p_id INT, p_date_type eDate_type, p_date DATE) AS
+$$
+BEGIN
+	UPDATE purchase_dates SET start_notifying_at = p_date WHERE purchase_id = p_id AND date_type = p_date_type;
+END;
+$$
+LANGUAGE plpgsql;
+
+
+-- СОЗДАЕТ ПОЛНУЮ ПОКУПКУ С ДОКУМЕНТАМИ И ДАТАМИ
+CREATE OR REPLACE PROCEDURE create_purchase (
+	--purchase
+	p_license_id INT,
+	p_purchase_object ePurchase_object,
+	p_purchased_at TIMESTAMP,
+	p_count INT,
+	
+	--document
+	p_doc_no INT,
+	p_name VARCHAR(100),
+	p_signing_date DATE,
+	p_directum_link VARCHAR(100),
+	p_status eStatus,
+	p_document_type eDocument_type,
+	
+	--purchase_dates
+	p_date_type eDate_type,
+	p_starts_at DATE,
+	p_ends_at DATE DEFAULT NULL,
+	p_start_notifying_at DATE DEFAULT NULL
+) AS
+$$
+DECLARE
+	new_purchase_id INT;
+BEGIN
+	INSERT INTO purchase (
+		license_id,
+		purchase_object,
+		purchased_at,
+		count,
+		is_planned
+	) VALUES (
+		p_license_id, 
+        p_purchase_object, 
+        p_purchased_at, 
+        p_count, 
+        false
+	)
+	RETURNING id INTO new_purchase_id;
+
+	INSERT INTO document (
+		purchase_id,
+		doc_no,
+		name,
+		signing_date,
+		directum_link,
+		status,
+		document_type
+	) VALUES (
+		new_purchase_id,
+		p_doc_no,
+		p_name,
+		p_signing_date,
+		p_directum_link,
+		p_status,
+		p_document_type
+	);
+
+	INSERT INTO purchase_dates (
+		purchase_id,
+		date_type,
+		starts_at,
+		ends_at,
+		start_notifying_at
+	) VALUES (
+		new_purchase_id,
+		p_date_type,
+		p_starts_at,
+		p_ends_at,
+		p_start_notifying_at
+	);
+END;
+$$
+LANGUAGE plpgsql;
+
+--СОЗДАНИЕ ПЛАНИРУЕМОЙ ПОКУПКИ
+CREATE OR REPLACE PROCEDURE create_planned_purchase (
+	p_license_id INT,
+	p_purchase_object ePurchase_object,
+	p_purchased_at TIMESTAMP,
+	p_count INT
+) AS
+$$
+BEGIN
+	INSERT INTO purchase (license_id, purchase_object, purchased_at, count, is_planned)
+	VALUES (p_license_id, p_purchase_object, p_purchased_at, p_count, true);
+END;
+$$
+LANGUAGE plpgsql;
+
+--ПЕРЕВОД ПОКУПКИ ИЗ ПЛАНИРУЕМОЙ В ОБЫЧНУЮ
+CREATE OR REPLACE PROCEDURE finalise_purchase (
+	--purchase_id
+	p_id INT,
+	
+	--document
+	p_doc_no INT,
+	p_name VARCHAR(100),
+	p_signing_date DATE,
+	p_directum_link VARCHAR(100),
+	p_status eStatus,
+	p_document_type eDocument_type,
+	
+	--purchase_dates
+	p_date_type eDate_type,
+	p_starts_at DATE,
+	p_ends_at DATE DEFAULT NULL,
+	p_start_notifying_at DATE DEFAULT NULL
+) AS
+$$
+BEGIN
+	UPDATE purchase SET is_planned = false WHERE id = p_id;
+	INSERT INTO document (
+		purchase_id,
+		doc_no,
+		name,
+		signing_date,
+		directum_link,
+		status,
+		document_type
+	) VALUES (
+		p_id,
+		p_doc_no,
+		p_name,
+		p_signing_date,
+		p_directum_link,
+		p_status,
+		p_document_type
+	);
+
+	INSERT INTO purchase_dates (
+		purchase_id,
+		date_type,
+		starts_at,
+		ends_at,
+		start_notifying_at
+	) VALUES (
+		p_id,
+		p_date_type,
+		p_starts_at,
+		p_ends_at,
+		p_start_notifying_at
+	);
+END;
+$$
+LANGUAGE plpgsql;
