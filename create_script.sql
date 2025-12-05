@@ -882,3 +882,32 @@ BEGIN
 END;
 $$
 LANGUAGE plpgsql;
+
+-- СОЗДАНИЕ БРОНИ
+-- скорее всего стоит добавить проверку на пересечение броней я не разобрался
+CREATE PROCEDURE create_booking(
+	p_reestr_id INT,
+	p_booking_start TIMESTAMP,
+	p_duration INTERVAL
+) AS
+$$
+DECLARE
+	v_max_booking_period INTERVAL;
+BEGIN
+	SELECT max_booking_period INTO v_max_booking_period 
+	FROM reestr JOIN license ON license.id = reestr.license_id
+	WHERE reestr.id = p_reestr_id;
+
+	IF v_max_booking_period IS NULL THEN
+		RAISE EXCEPTION 'no record found';
+	END IF;
+	
+	IF p_duration > v_max_booking_period THEN
+		RAISE EXCEPTION 'booking duration cant be more than max license duration';
+	END IF;
+
+	INSERT INTO booking (reestr_id, booking_start, duration)
+	VALUES (p_reestr_id, p_booking_start, p_duration);
+END;
+$$
+LANGUAGE plpgsql;
