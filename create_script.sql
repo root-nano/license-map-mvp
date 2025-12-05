@@ -272,6 +272,7 @@ CREATE TABLE linking_license_obj_to_archive_license (
 );
 
 -- тут скорее всего херня некит проверь пж
+-- maybe add user_id/original_user_id
 CREATE TABLE archive_users (
 	id SERIAL PRIMARY KEY,
 	archived_at TIMESTAMP DEFAULT now()::timestamp,
@@ -370,7 +371,7 @@ CREATE OR REPLACE PROCEDURE create_license_obj (
 ) AS
 $$
 BEGIN
-	INSERT INTO license_obj (
+	INSERT INTO license_obj_catalog (
 		license_metric_type,
 		licensing_type,
 		object_type,
@@ -436,7 +437,7 @@ END;
 $$
 LANGUAGE plpgsql;
 
-CREATE OR REPLACE PROCEDURE delete_license_obj (p_id) AS
+CREATE OR REPLACE PROCEDURE delete_license_obj (p_id INT) AS
 $$
 BEGIN
 	DELETE FROM license_obj WHERE id = p_id;
@@ -631,7 +632,7 @@ BEGIN
 	UPDATE company_catalog SET
 		name = COALESCE (p_name, name),
 		is_domestic = COALESCE (p_is_domestic, is_domestic),
-		p_website = COALESCE (p_website, website)
+		website = COALESCE (p_website, website)
 	WHERE id = p_id;
 END;
 $$
@@ -748,6 +749,136 @@ BEGIN
         p_name, 
         p_functionality_description
     );
+END;
+$$
+LANGUAGE plpgsql;
+
+-- CREATE GROUP
+CREATE PROCEDURE create_group (
+	p_name VARCHAR(100)
+) AS
+$$
+BEGIN
+	INSERT INTO groups (name) VALUES (p_name);
+END;
+$$
+LANGUAGE plpgsql;
+
+-- DELETE GROUP
+-- что делать с fk
+CREATE PROCEDURE delete_group (
+	p_id INT
+) AS
+$$
+BEGIN
+	DELETE FROM groups WHERE id = p_id;
+END;
+$$
+LANGUAGE plpgsql;
+
+-- ADD USER TO GROUP
+CREATE PROCEDURE group_add_user (
+	p_user_id INT,
+	p_group_id INT
+) AS
+$$
+BEGIN
+	INSERT INTO linking_user_to_groups VALUES (p_group_id, p_user_id);
+END;
+$$
+LANGUAGE plpgsql;
+
+-- REMOVE USER FROM GROUP
+CREATE PROCEDURE group_delete_user (
+	p_user_id INT,
+	p_group_id INT
+) AS
+$$
+BEGIN
+	DELETE FROM linking_user_to_groups WHERE user_id = p_user_id AND group_id = p_group_id;
+END;
+$$
+LANGUAGE plpgsql;
+
+
+-- CREATE ARM
+CREATE OR REPLACE PROCEDURE create_arm (
+	p_name VARCHAR(100),
+	p_arm_type eArm_type
+) AS
+$$
+BEGIN
+	INSERT INTO arm (name, arm_type) VALUES (p_name, p_arm_type);
+END;
+$$
+LANGUAGE plpgsql;
+
+-- DELETE ARM
+-- также что делать с fk хз
+CREATE OR REPLACE PROCEDURE delete_arm (
+	p_id INT
+) AS
+$$
+BEGIN
+	DELETE FROM arm WHERE id = p_id;
+END;
+$$
+LANGUAGE plpgsql;
+
+-- ADD USER TO ARM
+CREATE OR REPLACE PROCEDURE arm_add_user (
+	p_user_id INT,
+	p_arm_id INT
+) AS
+$$
+BEGIN
+	INSERT INTO linking_users_to_arms (arm_id, user_id) VALUES (p_arm_id, p_user_id);
+END;
+$$
+LANGUAGE plpgsql;
+
+-- REMOVE USER FROM ARM
+CREATE OR REPLACE PROCEDURE arm_delete_user (
+	p_user_id INT,
+	p_arm_id INT
+) AS
+$$
+BEGIN
+	DELETE FROM linking_users_to_arms WHERE user_id = p_user_id AND arm_id = p_arm_id;
+END;
+$$
+LANGUAGE plpgsql;
+
+-- привязка лицензии к субъекту
+CREATE PROCEDURE link_license_with (
+	p_license_id INT,
+	p_group_id INT DEFAULT NULL,
+	p_arm_id INT DEFAULT NULL,
+	p_user_id INT DEFAULT NULL
+) AS
+$$
+DECLARE
+	subject_amount INT;
+	v_link_type eLink_type;
+BEGIN
+	subject_amount := (p_group_id IS NOT NULL)::int + (p_arm_id IS NOT NULL)::int  + (p_user_id IS NOT NULL)::int;
+
+	IF subject_amount = 0 THEN
+		RAISE EXCEPTION 'KYS no subject';
+	ELSEIF subject_amount > 1 THEN
+		RAISE EXCEPTION 'KYS too many subjects';
+	END IF;
+
+	IF p_group_id IS NOT NULL THEN
+		v_link_type := 'group';
+	ELSEIF p_arm_id IS NOT NULL THEN
+		v_link_type := 'arm';
+	ELSEIF p_user_id IS NOT NULL THEN
+		v_link_type := 'user';
+	END IF;
+
+	INSERT INTO reestr (link_type, license_id, group_id, user_id, arm_id)
+	VALUES (v_link_type, p_license_id, p_group_id, p_user_id, p_arm_id);
 END;
 $$
 LANGUAGE plpgsql;
