@@ -42,15 +42,16 @@ CREATE TABLE users (
 	org_struct_id INT NOT NULL REFERENCES org_struct(id)
 );
 
+-- Добавил каскады на случай удаления
 CREATE TABLE linking_users_to_groups (
-	group_id INT REFERENCES groups(id),
-	user_id INT REFERENCES users(id),
-	PRIMARY KEY (group_id, user_id)
+	group_id INT REFERENCES groups(id) ON DELETE CASCADE ON UPDATE CASCADE,
+	user_id INT REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+	PRIMARY KEY (user_id, group_id) -- Поменял порядок для оптимизации процедуры по удалению 
 );
 
 CREATE TABLE linking_users_to_arms (
-	user_id INT REFERENCES users(id),
-	arm_id INT REFERENCES arm(id),
+	user_id INT REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+	arm_id INT REFERENCES arm(id) ON DELETE CASCADE ON UPDATE CASCADE,
 	PRIMARY KEY (user_id, arm_id)
 );
 
@@ -228,67 +229,51 @@ CREATE TABLE booking (
 );
 
 -- ARCHIVES 
-
+-- На миро была сложная версия, которую Зыков вообще не видел, он принял простую с тремя табличками
 CREATE TABLE archive_license (
-	id INT PRIMARY KEY,
-	name VARCHAR(100) NOT NULL,
+	id INT NOT NULL,
 	archived_at TIMESTAMP DEFAULT now()::timestamp,
-	port INT NOT NULL,
-	max_booking_period INTERVAL NOT NULL
-);
-
-CREATE TABLE archive_purchase (
-	id INT PRIMARY KEY,
-	archive_license_id INT NOT NULL REFERENCES archive_license(id),
-	purchase_object ePurchase_object NOT NULL,
-	purchase_at TIMESTAMP NOT NULL,
-	count INT NOT NULL
-);
-
-CREATE TABLE archive_document (
-	id INT PRIMARY KEY,
-	archive_purchase_id INT NOT NULL REFERENCES archive_purchase(id),
-	doc_no INT NOT NULL,
 	name VARCHAR(100) NOT NULL,
-	signing_date DATE NOT NULL,
-	directum_link VARCHAR(100) NOT NULL,
-	status eStatus NOT NULL,
-	document_type eDocument_type NOT NULL
+	license_server_id INT REFERENCES license_server(id) ON DELETE SET NULL ON UPDATE CASCADE,
+	port INT NOT NULL,
+	responsible_user_id INT REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE,
+	max_booking_period INTERVAL NOT NULL,
+	PRIMARY KEY(id, archived_at)
 );
 
-CREATE TABLE archive_purchase_dates (
-	archive_purchase_id INT NOT NULL REFERENCES archive_purchase(id),
-	date_type eDate_type NOT NULL,
-	starts_at DATE NOT NULL,
-	ends_at DATE,
-	start_notifying_at DATE,
-	PRIMARY KEY (archive_purchase_id, date_type)
-);
-
-CREATE TABLE linking_license_obj_to_archive_license (
-	license_obj_id INT REFERENCES license_obj_catalog(id),
-	archive_license_id INT REFERENCES archive_license(id),
-	PRIMARY KEY (license_obj_id, archive_license_id)
-);
-
--- тут скорее всего херня некит проверь пж
--- maybe add user_id/original_user_id
 CREATE TABLE archive_users (
-	id SERIAL PRIMARY KEY,
+	id INT NOT NULL,
 	archived_at TIMESTAMP DEFAULT now()::timestamp,
 	name VARCHAR(100) NOT NULL,
 	email VARCHAR(100) NOT NULL,
 	SAM_account_name VARCHAR(100) NOT NULL,
 	employee_id VARCHAR(4) NOT NULL,
 	is_editor BOOL NOT NULL,
-	org_struct_id INT NOT NULL
+	org_struct_id INT NOT NULL ON DELETE SET NULL ON UPDATE CASCADE,
+	PRIMARY KEY (id, archived_at)
 );
 
--- END CREATE TABLE
+CREATE TABLE archive_license_obj_catalog (
+	id INT NOT NULL,
+	archived_at TIMESTAMP DEFAULT now()::timestamp,
+	license_metric_type eLicensing_metric_type NOT NULL,
+	licensing_type eLicensing_type NOT NULL,
+	object_type eObject_type NOT NULL,
+	max_possible_version VARCHAR(50) NOT NULL,
+	current_version VARCHAR(50) NOT NULL,
+	software_id INT REFERENCES software_catalog(id) ON DELETE CASCADE ON UPDATE CASCADE,
+	package_id INT REFERENCES package_catalog(id) ON DELETE CASCADE ON UPDATE CASCADE,
+	module_id INT REFERENCES module_catalog(id) ON DELETE CASCADE ON UPDATE CASCADE,
+	key_type eKey_type NOT NULL,
+	max_activations INT NOT NULL,
+	max_concurrent INT NOT NULL,
+	PRIMARY KEY (id, archived_at)
+);
 
 
+-- =====================TRIGGERS=====================
 -- ТРИГГЕР ДЛЯ ПРОВЕРКИ ИЕРАРХИИ В ТАБЛИЦЕ ОРГАНИЗАЦИЙ
-
+-- Триггер норм
 CREATE OR REPLACE FUNCTION org_hierarchy_checker()
 RETURNS trigger AS
 $$
@@ -330,19 +315,28 @@ EXECUTE FUNCTION org_hierarchy_checker();
 
 -- VIEW ДЛЯ АКТИВНЫХ ЛИЦЕНЗИЙ
 CREATE VIEW active_licenses AS
-	SELECT license.id, license.name, license_server_id, port, responsible_user_id, max_booking_period 
-	FROM license 
-		JOIN purchase ON license.id = purchase.license_id
-			JOIN document ON purchase.id = document.purchase_id
-			WHERE document.status = 'active';
+	SELECT DISTINCT ON (l.id)
+		l.id,
+		l.name,
+		l.license_server_id,
+		l.port,
+		l.responsible_user_id,
+		l.max_booking_period
+	FROM license AS l 
+	JOIN purchase AS p ON l.id = p.license_id
+	JOIN purchase_dates AS pd ON p.id = pd.purchase_id
+	WHERE pd.date_type = 'license'::eDate_type AND now()::date <= pd.ends_at;
 
 -- ТРИГГЕР ДЛЯ АРХИВАЦИИ ТАБЛИЦЫ ПОЛЬЗОВАТЕЛЕЙ
+-- Норм
 CREATE OR REPLACE FUNCTION users_archiver()
 RETURNS trigger AS
 $$
 BEGIN
-	INSERT INTO archive_users (name, email, SAM_account_name, employee_id, is_editor, org_struct_id)
-	VALUES (OLD.name, OLD.email, OLD.SAM_account_name, OLD.employee_id, OLD.is_editor, OLD.org_struct_id);
+	INSERT INTO archive_users 
+	(name, email, SAM_account_name, employee_id, is_editor, org_struct_id)
+	VALUES 
+	(OLD.name, OLD.email, OLD.SAM_account_name, OLD.employee_id, OLD.is_editor, OLD.org_struct_id);
 	RETURN NULL;
 END;
 $$
@@ -354,8 +348,8 @@ FOR EACH ROW
 EXECUTE FUNCTION users_archiver();
 
 
+-- =====================LICENSE_OBJ OPS=====================
 -- license obj procedures
-
 CREATE OR REPLACE PROCEDURE create_license_obj (
 	p_licensing_metric_type eLicensing_metric_type,
 	p_licensing_type eLicensing_type,
@@ -403,16 +397,13 @@ LANGUAGE plpgsql;
 
 
 -- call update_license_obj (arg => val);
+-- Некит: тут некоторые атрибуты удалил, которые нельзя будет менять 
 CREATE OR REPLACE PROCEDURE update_license_obj (
 	p_id INT,
 	p_licensing_metric_type eLicensing_metric_type DEFAULT NULL,
 	p_licensing_type eLicensing_type DEFAULT NULL,
-	p_object_type eObject_type DEFAULT NULL,
 	p_max_possible_version VARCHAR(50) DEFAULT NULL,
 	p_current_version VARCHAR(50) DEFAULT NULL,
-	p_software_id INT DEFAULT NULL,
-	p_package_id INT DEFAULT NULL,
-	p_module_id INT DEFAULT NULL,
 	p_key_type eKey_type DEFAULT NULL,
 	p_max_activations INT DEFAULT NULL,
 	p_max_concurrent INT DEFAULT NULL
@@ -423,12 +414,8 @@ BEGIN
 	SET
 		license_metric_type = COALESCE (p_licensing_metric_type, license_metric_type),
 		licensing_type = COALESCE (p_licensing_type, licensing_type),
-		object_type = COALESCE (p_object_type, object_type),
 		max_possible_version = COALESCE (p_max_possible_version, max_possible_version),
 		current_version = COALESCE (p_current_version, current_version),
-		software_id = COALESCE (p_software_id, software_id),
-		package_id = COALESCE (p_package_id, package_id),
-		module_id = COALESCE (p_module_id, module_id),
 		key_type = COALESCE (p_key_type, key_type),
 		max_activations = COALESCE (p_max_activations, max_activations),
 		max_concurrent = COALESCE (p_max_concurrent, max_concurrent)
@@ -445,6 +432,7 @@ END;
 $$
 LANGUAGE plpgsql;
  
+-- =====================Purchases=====================
 -- ПРОЦЕДУРЫ ДЛЯ ПОКУПОК
 
 -- ИЗМЕНИТЬ ДАТУ УВЕДОМЛЕНИЙ
@@ -456,6 +444,61 @@ END;
 $$
 LANGUAGE plpgsql;
 
+/* Некит: 
+я сделал так, потому что у нас будет сразу пачка документов/дат, 
+которые мы передаём как аргумент.
+вообще вариант достаточно жопошный, так как я в SQLModel 
+не нашел чёткого синтаксиса по вызову процедур 
+с такими сложными структурами
+Вот что мне иишка выдала, но я ей не верю: 
+from sqlalchemy.dialects.postgresql import composite
+from sqlmodel import Session, create_engine
+
+engine = create_engine("postgresql+psycopg2://user:pass@localhost/dbname")
+
+MyType = composite("my_type", engine, ["id", "name"])
+	
+from sqlmodel import Session
+
+def call_process_things(items: list[dict]):
+    with Session(engine) as session:
+        # Build composite instances
+        pg_items = [MyType(i["id"], i["name"]) for i in items]
+
+        session.exec(
+            "SELECT process_things(:things)",
+            {"things": pg_items}
+        )
+        session.commit()
+
+*/
+
+-- Пока пусть типы тут повесят, чтобы удобно было сверяться, потом их на верх закинем
+-- Вообще составные типы удобная штука, но все их атрибуты могут быть NULL, 
+-- главная их проблема
+
+-- И ещё я не придумал пока как называть эти типы, чтобы они отличались от других
+
+CREATE TYPE tDocument AS (
+	doc_no INT,
+	name VARCHAR(100),
+	signing_date DATE,
+	directum_link VARCHAR(100),
+	status eStatus,
+	document_type eDocument_type,
+);
+
+CREATE TYPE tPurchase_date AS (
+	/* 
+		Это поле скрываем, потому что у нас в процедурах уже будет переменная, 
+		которые является айдишкой покупки 
+		purchase_id INT NOT NULL REFERENCES purchase(id),
+	*/
+	date_type eDate_type,
+	starts_at DATE,
+	ends_at DATE,
+	start_notifying_at DATE,
+);
 
 -- СОЗДАЕТ ПОЛНУЮ ПОКУПКУ С ДОКУМЕНТАМИ И ДАТАМИ
 CREATE OR REPLACE PROCEDURE create_purchase (
@@ -464,25 +507,23 @@ CREATE OR REPLACE PROCEDURE create_purchase (
 	p_purchase_object ePurchase_object,
 	p_purchased_at TIMESTAMP,
 	p_count INT,
-	
-	--document
-	p_doc_no INT,
-	p_name VARCHAR(100),
-	p_signing_date DATE,
-	p_directum_link VARCHAR(100),
-	p_status eStatus,
-	p_document_type eDocument_type,
-	
-	--purchase_dates
-	p_date_type eDate_type,
-	p_starts_at DATE,
-	p_ends_at DATE DEFAULT NULL,
-	p_start_notifying_at DATE DEFAULT NULL
+
+	-- Наборы объектов
+	p_documents tDocument[],
+	p_purchase_dates tPurchase_date[]
 ) AS
 $$
 DECLARE
 	new_purchase_id INT;
 BEGIN
+	IF array_length(p_documents) < 1 THEN
+		RAISE EXCEPTION 'p_documents must have at least 1 element';	
+	END IF;
+
+	IF array_length(p_purchase_dates) < 1 OR array_length(p_purchase_dates) > 3 THEN
+		RAISE EXCEPTION 'p_purchase_dates length must be in 1..3';
+	END IF;
+
 	INSERT INTO purchase (
 		license_id,
 		purchase_object,
@@ -498,37 +539,43 @@ BEGIN
 	)
 	RETURNING id INTO new_purchase_id;
 
-	INSERT INTO document (
-		purchase_id,
-		doc_no,
-		name,
-		signing_date,
-		directum_link,
-		status,
-		document_type
-	) VALUES (
-		new_purchase_id,
-		p_doc_no,
-		p_name,
-		p_signing_date,
-		p_directum_link,
-		p_status,
-		p_document_type
-	);
+	FOREACH doc IN ARRAY p_documents
+	LOOP
+		INSERT INTO document (
+			purchase_id,
+			doc_no,
+			name,
+			signing_date,
+			directum_link,
+			status,
+			document_type
+		) VALUES (
+			new_purchase_id,
+			doc.doc_no,
+			doc.name,
+			doc.signing_date,
+			doc.directum_link,
+			doc.status,
+			doc.document_type
+		);
+	END LOOP;
 
-	INSERT INTO purchase_dates (
-		purchase_id,
-		date_type,
-		starts_at,
-		ends_at,
-		start_notifying_at
-	) VALUES (
-		new_purchase_id,
-		p_date_type,
-		p_starts_at,
-		p_ends_at,
-		p_start_notifying_at
-	);
+	FOREACH pd IN ARRAY p_purchase_dates
+	LOOP
+		INSERT INTO purchase_dates (
+			purchase_id,
+			date_type,
+			starts_at,
+			ends_at,
+			start_notifying_at
+		) VALUES (
+			new_purchase_id,
+			pd.date_type,
+			pd.starts_at,
+			pd.ends_at,
+			pd.start_notifying_at
+		);
+	END LOOP;
 END;
 $$
 LANGUAGE plpgsql;
@@ -553,58 +600,56 @@ CREATE OR REPLACE PROCEDURE finalise_purchase (
 	--purchase_id
 	p_id INT,
 	
-	--document
-	p_doc_no INT,
-	p_name VARCHAR(100),
-	p_signing_date DATE,
-	p_directum_link VARCHAR(100),
-	p_status eStatus,
-	p_document_type eDocument_type,
-	
-	--purchase_dates
-	p_date_type eDate_type,
-	p_starts_at DATE,
-	p_ends_at DATE DEFAULT NULL,
-	p_start_notifying_at DATE DEFAULT NULL
+	p_documents tDocument[],
+	p_purchase_dates tPurchase_date[]
 ) AS
 $$
 BEGIN
 	UPDATE purchase SET is_planned = false WHERE id = p_id;
-	INSERT INTO document (
-		purchase_id,
-		doc_no,
-		name,
-		signing_date,
-		directum_link,
-		status,
-		document_type
-	) VALUES (
-		p_id,
-		p_doc_no,
-		p_name,
-		p_signing_date,
-		p_directum_link,
-		p_status,
-		p_document_type
-	);
+	
+	FOREACH doc IN ARRAY p_documents
+	LOOP
+		INSERT INTO document (
+			purchase_id,
+			doc_no,
+			name,
+			signing_date,
+			directum_link,
+			status,
+			document_type
+		) VALUES (
+			p_id,
+			doc.doc_no,
+			doc.name,
+			doc.signing_date,
+			doc.directum_link,
+			doc.status,
+			doc.document_type
+		);
+	END LOOP;
 
-	INSERT INTO purchase_dates (
-		purchase_id,
-		date_type,
-		starts_at,
-		ends_at,
-		start_notifying_at
-	) VALUES (
-		p_id,
-		p_date_type,
-		p_starts_at,
-		p_ends_at,
-		p_start_notifying_at
-	);
+	FOREACH pd IN ARRAY p_purchase_dates
+	LOOP
+		INSERT INTO purchase_dates (
+			purchase_id,
+			date_type,
+			starts_at,
+			ends_at,
+			start_notifying_at
+		) VALUES (
+			p_id,
+			pd.date_type,
+			pd.starts_at,
+			pd.ends_at,
+			pd.start_notifying_at
+		);
+	END LOOP;
 END;
 $$
 LANGUAGE plpgsql;
 
+
+-- =====================Company, soft, package, module=====================
 
 -- СОЗДАНИЕ РЕДАКТИРОВАНИЕ COMPANY
 
@@ -753,6 +798,8 @@ END;
 $$
 LANGUAGE plpgsql;
 
+-- =====================GROUP=====================
+
 -- CREATE GROUP
 CREATE PROCEDURE create_group (
 	p_name VARCHAR(100)
@@ -765,7 +812,7 @@ $$
 LANGUAGE plpgsql;
 
 -- DELETE GROUP
--- что делать с fk
+	-- Я добавил каскады, которые будут чистить связи в linking таблицах
 CREATE PROCEDURE delete_group (
 	p_id INT
 ) AS
@@ -800,6 +847,7 @@ END;
 $$
 LANGUAGE plpgsql;
 
+-- =====================ARM=====================
 
 -- CREATE ARM
 CREATE OR REPLACE PROCEDURE create_arm (
@@ -815,6 +863,7 @@ LANGUAGE plpgsql;
 
 -- DELETE ARM
 -- также что делать с fk хз
+	-- Я добавил каскады, которые будут чистить связи в linking таблицах
 CREATE OR REPLACE PROCEDURE delete_arm (
 	p_id INT
 ) AS
@@ -849,6 +898,7 @@ END;
 $$
 LANGUAGE plpgsql;
 
+-- =====================LICENSE OPS=====================
 -- привязка лицензии к субъекту
 CREATE PROCEDURE link_license_with (
 	p_license_id INT,
@@ -864,9 +914,9 @@ BEGIN
 	subject_amount := (p_group_id IS NOT NULL)::int + (p_arm_id IS NOT NULL)::int  + (p_user_id IS NOT NULL)::int;
 
 	IF subject_amount = 0 THEN
-		RAISE EXCEPTION 'KYS no subject';
+		RAISE EXCEPTION 'no subject passed';
 	ELSEIF subject_amount > 1 THEN
-		RAISE EXCEPTION 'KYS too many subjects';
+		RAISE EXCEPTION 'too many subjects passed';
 	END IF;
 
 	IF p_group_id IS NOT NULL THEN
@@ -885,6 +935,7 @@ LANGUAGE plpgsql;
 
 -- СОЗДАНИЕ БРОНИ
 -- скорее всего стоит добавить проверку на пересечение броней я не разобрался
+-- Некит: я сейчас подумаю как сделать, пока комитну что есть
 CREATE PROCEDURE create_booking(
 	p_reestr_id INT,
 	p_booking_start TIMESTAMP,
