@@ -935,7 +935,6 @@ LANGUAGE plpgsql;
 
 -- СОЗДАНИЕ БРОНИ
 -- скорее всего стоит добавить проверку на пересечение броней я не разобрался
--- Некит: я сейчас подумаю как сделать, пока комитну что есть
 CREATE PROCEDURE create_booking(
 	p_reestr_id INT,
 	p_booking_start TIMESTAMP,
@@ -943,6 +942,8 @@ CREATE PROCEDURE create_booking(
 ) AS
 $$
 DECLARE
+    v_max_end TIMESTAMP;
+	v_booking_does_fit BOOLEAN;
 	v_max_booking_period INTERVAL;
 BEGIN
 	SELECT max_booking_period INTO v_max_booking_period 
@@ -956,9 +957,55 @@ BEGIN
 	IF p_duration > v_max_booking_period THEN
 		RAISE EXCEPTION 'booking duration cant be more than max license duration';
 	END IF;
+	
 
-	INSERT INTO booking (reestr_id, booking_start, duration)
-	VALUES (p_reestr_id, p_booking_start, p_duration);
+    SELECT 
+        MAX(b.booking_start + b.duraition) INTO v_max_end
+    FROM booking AS b
+    WHERE b.reestr_id = p_reestr_id;
+    /*
+	Проверка на возможность вставки
+	Посмотрим где лежит новая бронь:
+		1) Между бронью, p_booking_start < max(start + dur) 
+		2) после брони, p_booking_start >= max(start + dur)
+	*/
+	-- (1) Проверка на подходящий интервал
+    --     Интервалы в прошлом будут отбрасываться
+    IF p_booking_start < v_max_end THEN
+        -- Подумать о переносе этого страха в функцию
+        WITH cte AS (
+            SELECT 
+                b.booking_start,
+                b.booking_start + b.duraition AS booking_end,
+                lead(b.booking_start, 1) OVER (
+                    ORDER BY b.booking_start 
+                ) AS next_start
+            FROM booking AS b
+            WHERE 
+                b.reestr_id = p_reestr_id AND
+                b.booking_start::date >= now()::date -- date потому что timestamp слишком точный могут возникнуть проблемы
+                                                -- а условие это нужно для отбрасывания того, что у нас в прошлом
+        )
+        SELECT EXISTS(
+            SELECT 1
+            FROM cte
+            WHERE
+                cte.next_start IS NOT NULL AND -- скипаем последнюю строчку
+                cte.booking_end <= p_booking_start AND
+                (p_booking_start + p_duration) <= cte.next_start
+        ) INTO v_booking_does_fit;
+            
+        IF v_booking_does_fit THEN 
+            INSERT INTO booking (reestr_id, booking_start, duration)
+            VALUES (p_reestr_id, p_booking_start, p_duration);
+        ELSE
+            RAISE EXCEPTION 'there is no suitable interval inbetween existing bookings';
+        END IF;
+	-- (2) Просто добавляем как есть  
+	ELSE
+        INSERT INTO booking (reestr_id, booking_start, duration)
+        VALUES (p_reestr_id, p_booking_start, p_duration);
+    END IF;
 END;
 $$
 LANGUAGE plpgsql;
